@@ -1,0 +1,26 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "overheard",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-11-01",
+
+  // Only reachable at the custom domain. The Worker's password gate covers
+  // every URL, but the extra *.workers.dev and preview addresses are off anyway.
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    { "pattern": "overheard.manderson.me", "custom_domain": true }
+  ],
+
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    // Every request goes through the Worker first, so the password gate
+    // covers the app's files too, not just /vendor/.
+    "run_worker_first": true
+  },
+  "r2_buckets": [
+    { "binding": "VENDOR", "bucket_name": "overheard-vendor" }
+  ],
+  "observability": { "enabled": true }
+}

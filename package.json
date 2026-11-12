@@ -1,0 +1,24 @@
+{
+  "name": "overheard",
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p worker/tsconfig.json && vite build",
+    "preview": "npm run build && wrangler dev",
+    "upload-wasm": "node scripts/upload-wasm.mjs",
+    "deploy": "npm run build && wrangler deploy",
+    "test": "node --experimental-strip-types --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@desert-ant-labs/voz": "4.3.0",
+    "onnxruntime-web": "1.31.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261112.1",
+    "typescript": "7.0.2",
+    "vite": "8.3.8",
+    "wrangler": "4.161.0"
+  },
+  "private": true,
+  "type": "module"
+}

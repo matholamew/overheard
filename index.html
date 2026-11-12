@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>Overheard — private video transcription</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="top">
+        <div class="brand">
+          <span class="logo" aria-hidden="true">◆</span>
+          <h1>Overheard</h1>
+        </div>
+        <p class="tagline">Drop a video or audio file. It's transcribed on this device — nothing is uploaded.</p>
+      </header>
+
+      <section id="notices" class="notices" aria-live="polite"></section>
+
+      <section class="panel" id="input-panel">
+        <label id="dropzone" class="dropzone" tabindex="0">
+          <input id="file-input" type="file" accept="video/*,audio/*,.mkv,.m4a,.opus,.webm,.mov" hidden />
+          <span class="drop-title">Drop a file here</span>
+          <span class="drop-sub">or click to choose · MP4, MOV, WebM, MP3, M4A, WAV…</span>
+        </label>
+        <p class="hint">English and 24 other European languages. Other languages produce confident nonsense.</p>
+      </section>
+
+      <section class="panel hidden" id="progress-panel" aria-live="polite">
+        <div class="progress-head">
+          <span id="progress-label">Working…</span>
+          <span id="progress-pct"></span>
+        </div>
+        <div class="bar"><div id="progress-fill" class="fill"></div></div>
+        <p id="progress-detail" class="detail"></p>
+      </section>
+
+      <section class="panel hidden" id="error-panel" role="alert">
+        <strong>Something went wrong.</strong>
+        <p id="error-message"></p>
+        <button id="error-retry" class="btn">Try another file</button>
+      </section>
+
+      <section class="hidden" id="result-panel">
+        <div class="panel result-head">
+          <div>
+            <h2 id="result-title"></h2>
+            <p id="result-stats" class="stats"></p>
+          </div>
+          <button id="new-file" class="btn ghost">New file</button>
+        </div>
+
+        <div class="result-grid">
+          <div class="panel media-panel">
+            <div id="media-slot"></div>
+          </div>
+
+          <div class="panel transcript-panel">
+            <div class="toolbar">
+              <div class="tabs" role="tablist">
+                <button class="tab active" data-view="segments" role="tab">Timestamped</button>
+                <button class="tab" data-view="text" role="tab">Plain text</button>
+              </div>
+              <div class="actions">
+                <button id="copy-btn" class="btn">Copy</button>
+                <div class="menu">
+                  <button id="download-btn" class="btn primary">Download ▾</button>
+                  <div id="download-menu" class="menu-list hidden">
+                    <button data-format="txt">Plain text (.txt)</button>
+                    <button data-format="timestamped">Timestamped (.txt)</button>
+                    <button data-format="srt">Subtitles (.srt)</button>
+                    <button data-format="vtt">Web captions (.vtt)</button>
+                    <button data-format="json">Words + timings (.json)</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div id="transcript" class="transcript"></div>
+          </div>
+        </div>
+      </section>
+
+      <footer class="foot">
+        Speech recognition by
+        <a href="https://desertant.com/models/voz/" target="_blank" rel="noopener">Voz from Desert Ant Labs</a>,
+        running in your browser. The model (~400 MB) downloads once and is cached.
+        · <a href="/__logout">Sign out</a>
+      </footer>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
