@@ -20,7 +20,8 @@ import {
   type Segment,
   type Word,
 } from "./captions";
-import { assignSpeakers, detectNames } from "./speakers";
+import { assignSpeakers, detectNames, type Turn } from "./speakers";
+import { mb, trackModelBytes } from "./bytes";
 
 declare const __ORT_WASM_URL__: string;
 
@@ -47,6 +48,7 @@ const els = {
   speakerToggle: $<HTMLInputElement>("speaker-toggle"),
   cast: $("cast"),
   castList: $("cast-list"),
+  skipSpeakers: $("skip-speakers"),
   transcript: $("transcript"),
   copyBtn: $("copy-btn"),
   downloadBtn: $("download-btn"),
@@ -95,45 +97,6 @@ let vozPromise: Promise<VozClass> | null = null;
 const looksLikeNetworkError = (err: unknown) =>
   /network|aborted|failed to fetch|load failed|HTTP 5\d\d/i.test(err instanceof Error ? err.message : String(err));
 
-/**
- * Voz reports download progress per file (6 files, one of them ~350 MB), so its
- * bar sits still for minutes. Count bytes instead: while the model loads, wrap
- * fetch and tally every Hugging Face response as it streams in.
- */
-function trackModelBytes(onBytes: (loaded: number, total: number) => void): () => void {
-  const original = globalThis.fetch;
-  let loaded = 0;
-  let total = 0;
-  const isHub = (u: string) => /huggingface\.co|hf\.co|xethub|cdn-lfs/.test(u);
-  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    const res = await original(input, init);
-    const asked = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    if (!res.ok || !res.body || !(isHub(asked) || isHub(res.url))) return res;
-    total += Number(res.headers.get("content-length")) || 0;
-    const reader = res.body.getReader();
-    const counted = new ReadableStream<Uint8Array>({
-      async pull(controller) {
-        const { done, value } = await reader.read();
-        if (done) {
-          controller.close();
-          return;
-        }
-        loaded += value.byteLength;
-        onBytes(loaded, Math.max(total, loaded));
-        controller.enqueue(value);
-      },
-      cancel(reason) {
-        return reader.cancel(reason);
-      },
-    });
-    return new Response(counted, { status: res.status, statusText: res.statusText, headers: res.headers });
-  };
-  return () => {
-    globalThis.fetch = original;
-  };
-}
-
-const mb = (bytes: number) => Math.round(bytes / 1_000_000).toLocaleString();
 
 async function loadOnce(): Promise<VozClass> {
   const [{ Voz }, ort] = await Promise.all([
@@ -286,40 +249,84 @@ const nameOf: NameOf = (speaker) => {
   return typed || `Speaker ${current.speakers.indexOf(speaker) + 1}`;
 };
 
-/** Runs Who on the file and attaches a speaker to every word. Never throws:
- *  if it fails, the transcript is still shown, with a note. */
-async function labelSpeakers(file: File, words: Word[]): Promise<{ words: Word[]; speakers: number[]; names: Map<number, SpeakerName> }> {
+/** Runs Who in a background worker and attaches a speaker to every word.
+ *  Never throws: if it fails or is skipped, the transcript is still shown. */
+async function labelSpeakers(file: File, words: Word[], duration: number): Promise<{ words: Word[]; speakers: number[]; names: Map<number, SpeakerName> }> {
   const none = { words, speakers: [] as number[], names: new Map<number, SpeakerName>() };
-  try {
-    const { loadWho, decodeMono16k, findSpeakers } = await import("./who");
-    showProgress("Working out who's speaking…", "Loading the speaker model. The first time, that's about 32 MB.");
-    const stop = trackModelBytes((loaded, total) => {
-      setProgress(loaded / total);
-      els.progressDetail.textContent = `Speaker model: ${mb(loaded)} of ${mb(total)} MB. This happens once.`;
+  const worker = new Worker(new URL("./who-worker.ts", import.meta.url), { type: "module" });
+  const started = performance.now();
+  const longNote =
+    duration > 45 * 60
+      ? ` A ${formatClock(duration)} recording can take several minutes here; "Skip speaker labels" shows the transcript now.`
+      : "";
+  let stage = "loading";
+  let timer: number | undefined;
+
+  const turns = await new Promise<Turn[] | null>((resolve) => {
+    const finish = (value: Turn[] | null) => {
+      window.clearInterval(timer);
+      els.skipSpeakers.classList.add("hidden");
+      els.skipSpeakers.onclick = null;
+      worker.terminate();
+      resolve(value);
+    };
+    els.skipSpeakers.classList.remove("hidden");
+    els.skipSpeakers.onclick = () => finish(null);
+
+    showProgress("Working out who's speaking…", "Loading the speaker model. The first time, that's about 90 MB.");
+    els.skipSpeakers.classList.remove("hidden");
+
+    // A live clock, so a long analysis visibly isn't stuck.
+    timer = window.setInterval(() => {
+      if (stage !== "listening") return;
+      const secs = Math.round((performance.now() - started) / 1000);
+      els.progressDetail.textContent = `Listening for different voices. ${formatClock(secs)} so far.${longNote}`;
+    }, 1000);
+
+    worker.addEventListener("message", (event: MessageEvent<import("./who-worker").FromWorker>) => {
+      const msg = event.data;
+      if (msg.type === "decoded") {
+        console.info(`Speaker worker decoded ${msg.seconds.toFixed(1)}s of audio`);
+      } else if (msg.type === "bytes") {
+        setProgress(msg.loaded / msg.total);
+        els.progressDetail.textContent = `Speaker model: ${mb(msg.loaded)} of ${mb(msg.total)} MB. This happens once.`;
+      } else if (msg.type === "stage") {
+        stage = msg.stage;
+        if (msg.stage === "loading") {
+          els.progressDetail.textContent = "Loading the speaker model. The first time, that's about 90 MB.";
+          setIndeterminate();
+        } else if (msg.stage === "reading") {
+          els.progressLabel.textContent = "Working out who's speaking…";
+          els.progressDetail.textContent = "Reading the audio.";
+          setProgress(0);
+        } else if (msg.stage === "listening") {
+          setIndeterminate();
+          els.progressDetail.textContent = `Listening for different voices.${longNote}`;
+        }
+      } else if (msg.type === "progress") {
+        setProgress(msg.fraction);
+      } else if (msg.type === "done") {
+        finish(msg.turns);
+      } else if (msg.type === "error") {
+        console.warn("Speaker labelling failed:", msg.message);
+        notice(`Speakers couldn't be labelled this time, so the transcript has no names. (${msg.message.slice(0, 160)})`);
+        finish(null);
+      }
     });
-    let who;
-    try {
-      who = await loadWho();
-    } finally {
-      stop();
-    }
-    showProgress("Working out who's speaking…", "Reading the audio.");
-    setProgress(0);
-    const samples = await decodeMono16k(file, setProgress);
-    showProgress("Working out who's speaking…", "Listening for different voices.");
-    const { turns } = await findSpeakers(who, samples);
-    const labelled = assignSpeakers(words, turns);
-    const speakers = [...new Set(labelled.map((w) => w.speaker).filter((s): s is number => s !== undefined))];
-    if (speakers.length < 2) return none; // one voice: labels would only add noise
-    const names = new Map<number, SpeakerName>();
-    for (const [speaker, name] of detectNames(labelled)) names.set(speaker, { name, guessed: true });
-    return { words: labelled, speakers, names };
-  } catch (err) {
-    console.warn("Speaker labelling failed", err);
-    const message = err instanceof Error ? err.message : String(err);
-    notice(`Speakers couldn't be labelled this time, so the transcript has no names. (${message.slice(0, 160)})`);
-    return none;
-  }
+    worker.addEventListener("error", (e) => {
+      notice(`Speakers couldn't be labelled this time, so the transcript has no names. (${e.message || "worker error"})`);
+      finish(null);
+    });
+    worker.postMessage({ file });
+  });
+
+  if (!turns) return none;
+  const labelled = assignSpeakers(words, turns);
+  const speakers = [...new Set(labelled.map((w) => w.speaker).filter((s): s is number => s !== undefined))];
+  if (speakers.length < 2) return none; // one voice: labels would only add noise
+  const names = new Map<number, SpeakerName>();
+  for (const [speaker, name] of detectNames(labelled)) names.set(speaker, { name, guessed: true });
+  return { words: labelled, speakers, names };
 }
 
 let current: Current | null = null;
@@ -341,7 +348,7 @@ async function handleFile(file: File) {
 
     const labelled =
       els.speakerToggle.checked && result.words.length > 0
-        ? await labelSpeakers(file, result.words)
+        ? await labelSpeakers(file, result.words, result.duration)
         : { words: result.words as Word[], speakers: [] as number[], names: new Map<number, SpeakerName>() };
 
     if (current) URL.revokeObjectURL(current.mediaUrl);

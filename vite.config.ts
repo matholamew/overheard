@@ -83,5 +83,7 @@ export default defineConfig({
     target: "es2022",
     chunkSizeWarningLimit: 2000,
   },
-  worker: { format: "es" },
+  // The speaker worker loads Who, so it needs the same wasm-URL rewrite.
+  // The speaker worker loads Who, so it needs the same wasm-URL rewrite.
+  worker: { format: "es", plugins: () => [vendorWasm()] },
 });

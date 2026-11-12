@@ -318,6 +318,7 @@ a:hover { color: var(--red); }
 .fill { height: 100%; width: 0; background: var(--ink); transition: width 0.25s ease-out; }
 .fill.indeterminate { width: 30% !important; animation: sweep 1.3s ease-in-out infinite; }
 @keyframes sweep { from { transform: translateX(-110%); } to { transform: translateX(340%); } }
+#skip-speakers { margin-top: 18px; }
 .pct { font-family: var(--mono); font-size: 13px; min-width: 4ch; text-align: right; }
 
 /* ---------- Correction (errors) ---------- */
