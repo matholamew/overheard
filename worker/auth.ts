@@ -67,7 +67,7 @@ export async function sessionValid(cookieValue: string | null, password: string,
 }
 
 const SHARE_TITLE = "Overheard";
-const SHARE_TEXT = "Private video and audio transcription for our group. It runs in your browser, and nothing is uploaded.";
+const SHARE_TEXT = "Private video and audio transcription for our group. It runs in your browser, and your recordings are never uploaded.";
 
 /** Link-preview tags. Chat apps can only see the password page, so they live here. */
 export function shareTags(rawOrigin: string): string {

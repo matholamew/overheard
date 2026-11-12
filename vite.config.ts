@@ -1,5 +1,5 @@
 import { defineConfig, type Plugin } from "vite";
-import { copyFileSync, createReadStream, mkdirSync, readFileSync } from "node:fs";
+import { copyFileSync, createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { litertFiles, vendorFiles, vendorKeys } from "./scripts/vendor.mjs";
@@ -57,10 +57,76 @@ function vendorWasm(): Plugin {
   };
 }
 
+/**
+ * /licenses.txt: the license and notice files of everything that ships in the
+ * page, copied as delivered. Desert Ant's license (Section 9) asks that these
+ * notices be kept; minifying the code would otherwise drop them.
+ */
+const LICENSED: { name: string; files: string[]; fallback?: string }[] = [
+  { name: "@desert-ant-labs/voz", files: ["LICENSE.md"] },
+  { name: "@desert-ant-labs/who", files: ["LICENSE.md"] },
+  { name: "@desert-ant-labs/core", files: ["LICENSE.md", "THIRD_PARTY_NOTICES.md"] },
+  {
+    name: "onnxruntime-web",
+    files: [],
+    fallback:
+      "MIT License. Copyright (c) Microsoft Corporation.\nFull text: https://github.com/microsoft/onnxruntime/blob/main/LICENSE",
+  },
+  {
+    name: "@litertjs/core",
+    files: [],
+    fallback:
+      "Apache License 2.0. Copyright Google LLC.\nFull text: https://www.apache.org/licenses/LICENSE-2.0\nSource: https://github.com/google-ai-edge/LiteRT",
+  },
+  {
+    name: "@litertjs/wasm-utils",
+    files: [],
+    fallback: "Apache License 2.0. Copyright Google LLC.\nFull text: https://www.apache.org/licenses/LICENSE-2.0",
+  },
+  { name: "mediabunny", files: ["LICENSE"] },
+  { name: "@bjorn3/browser_wasi_shim", files: ["LICENSE-MIT", "LICENSE-APACHE"] },
+  { name: "@fontsource-variable/fraunces", files: ["LICENSE"] },
+  { name: "@fontsource-variable/newsreader", files: ["LICENSE"] },
+  { name: "@fontsource/ibm-plex-mono", files: ["LICENSE"] },
+];
+
+function licensesText(): string {
+  const parts = [
+    "Overheard: third-party licenses and notices",
+    "Everything below ships in this site, as delivered by its authors.",
+    "",
+  ];
+  for (const { name, files, fallback } of LICENSED) {
+    const dir = fileURLToPath(new URL(`./node_modules/${name}/`, import.meta.url));
+    const meta = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+    parts.push("=".repeat(78), `${name} ${meta.version}  (${meta.license ?? "see below"})`, "=".repeat(78), "");
+    const found = files.filter((f) => existsSync(join(dir, f)));
+    for (const f of found) parts.push(`--- ${f} ---`, readFileSync(join(dir, f), "utf8").trim(), "");
+    if (found.length === 0) parts.push(fallback ?? "License file not included in the package.", "");
+  }
+  return parts.join("\n") + "\n";
+}
+
+function licenses(): Plugin {
+  return {
+    name: "licenses",
+    writeBundle(options) {
+      writeFileSync(join(options.dir ?? "dist", "licenses.txt"), licensesText());
+    },
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (req.url?.split("?")[0] !== "/licenses.txt") return next();
+        res.setHeader("content-type", "text/plain; charset=utf-8");
+        res.end(licensesText());
+      });
+    },
+  };
+}
+
 const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"));
 
 export default defineConfig({
-  plugins: [vendorWasm()],
+  plugins: [vendorWasm(), licenses()],
   define: {
     // The exact .wasm file, not a folder: given a folder, ONNX Runtime also
     // fetches its .mjs glue from there instead of using the bundled copy.
