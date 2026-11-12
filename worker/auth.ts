@@ -82,7 +82,7 @@ export function loginPage(opts: { error?: boolean; notConfigured?: boolean } = {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/><meta name="robots" content="noindex"/>
 <meta name="theme-color" content="#f2ece1"/>
-<title>Overheard</title><link rel="icon" href="/favicon.svg" type="image/svg+xml"/>
+<title>Overheard</title><link rel="icon" href="/favicon.svg" type="image/svg+xml"/><link rel="apple-touch-icon" href="/apple-touch-icon.png"/>
 <style>
 :root{color-scheme:light;--paper:#f2ece1;--ink:#1b1813;--soft:#4a4339;--muted:#7d7365;--red:#b8321c}
 *{box-sizing:border-box}

@@ -31,8 +31,10 @@ export default {
     const url = new URL(request.url);
     const password = env.SITE_PASSWORD;
 
-    // The favicon is harmless and makes the login page look right.
-    if (url.pathname === "/favicon.svg") return env.ASSETS.fetch(request);
+    // The icons are harmless and make the login page look right.
+    if (url.pathname === "/favicon.svg" || url.pathname === "/apple-touch-icon.png") {
+      return env.ASSETS.fetch(request);
+    }
 
     // Fail closed: no password configured means nobody gets in.
     if (!password) return html(loginPage({ notConfigured: true }), 503);
