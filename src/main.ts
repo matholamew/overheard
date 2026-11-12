@@ -1,3 +1,9 @@
+import "@fontsource-variable/fraunces/full.css";
+import "@fontsource-variable/fraunces/full-italic.css";
+import "@fontsource-variable/newsreader/opsz.css";
+import "@fontsource-variable/newsreader/opsz-italic.css";
+import "@fontsource/ibm-plex-mono/400.css";
+import "@fontsource/ibm-plex-mono/500.css";
 import "./style.css";
 import type { Voz as VozClass, VozResult } from "@desert-ant-labs/voz";
 import {
@@ -232,8 +238,12 @@ function renderTranscript() {
       row.dataset.index = String(i);
       const time = document.createElement("time");
       time.textContent = formatClock(seg.start);
+      // Inner inline span so the highlighter follows the words, line by line.
       const text = document.createElement("span");
-      text.textContent = seg.text;
+      const ink = document.createElement("span");
+      ink.className = "hl";
+      ink.textContent = seg.text;
+      text.append(ink);
       row.append(time, text);
       row.addEventListener("click", () => seek(seg.start));
       frag.append(row);
@@ -394,5 +404,18 @@ function wire() {
   });
 }
 
+function setDateline() {
+  const el = document.getElementById("today");
+  if (el) {
+    el.textContent = new Date().toLocaleDateString("en-US", {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
+  }
+}
+
+setDateline();
 wire();
 void checkEnvironment();

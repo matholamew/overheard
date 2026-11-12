@@ -81,19 +81,29 @@ export function loginPage(opts: { error?: boolean; notConfigured?: boolean } = {
       </form>`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/><meta name="robots" content="noindex"/>
+<meta name="theme-color" content="#f2ece1"/>
 <title>Overheard</title><link rel="icon" href="/favicon.svg" type="image/svg+xml"/>
 <style>
-:root{color-scheme:dark;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-body{margin:0;min-height:100vh;display:grid;place-items:center;background:#12100e;color:#ece6dd}
-.card{width:min(360px,calc(100vw - 40px));background:#1b1815;border:1px solid #322c26;border-radius:12px;padding:28px}
-h1{margin:0 0 4px;font-size:24px}h1 span{color:#e8a34a}p{color:#9b9186;margin:0 0 18px;font-size:14px}
-label{display:block;font-size:13px;color:#9b9186;margin-bottom:6px}
-input{width:100%;box-sizing:border-box;font:inherit;padding:10px 12px;border-radius:8px;border:1px solid #322c26;background:#24201c;color:#ece6dd}
-input:focus{outline:2px solid #e8a34a;outline-offset:1px}
-button{margin-top:14px;width:100%;font:inherit;font-weight:600;padding:10px;border-radius:8px;border:0;background:#e8a34a;color:#1a1207;cursor:pointer}
-.err{color:#e2675a;margin:0 0 14px}code{font-size:13px}
+:root{color-scheme:light;--paper:#f2ece1;--ink:#1b1813;--soft:#4a4339;--muted:#7d7365;--red:#b8321c}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:var(--paper);color:var(--ink);
+font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif}
+.card{width:min(420px,100%);text-align:center}
+.date{font:11px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--soft);padding-bottom:10px;border-bottom:1px solid var(--ink)}
+h1{margin:12px 0 6px;font-size:64px;line-height:.9;font-weight:900;letter-spacing:-.035em}
+.rules{border-top:3px solid var(--ink);padding-top:3px}.rules div{border-top:1px solid var(--ink)}
+p{margin:26px 0 22px;font-size:18px;font-style:italic;color:var(--soft)}
+form{text-align:left}
+label{display:block;font:11px/1 ui-monospace,Menlo,monospace;letter-spacing:.16em;text-transform:uppercase;color:var(--red);margin-bottom:8px}
+input{width:100%;font:inherit;font-size:20px;padding:10px 2px;border:0;border-bottom:1px solid var(--ink);background:transparent;color:var(--ink);border-radius:0}
+input:focus{outline:none;border-bottom:2px solid var(--red)}
+button{margin-top:22px;width:100%;font:500 12px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;padding:14px;border:1px solid var(--ink);border-radius:0;background:var(--ink);color:var(--paper);cursor:pointer}
+button:hover{background:var(--red);border-color:var(--red)}
+.err{margin:0 0 18px;font-style:normal;font-size:16px;color:var(--red)}code{font-size:14px}
 </style></head><body><main class="card">
-<h1><span>◆</span> Overheard</h1><p>Private transcription for our group.</p>
+<div class="date">Private edition</div>
+<h1>Overheard</h1><div class="rules"><div></div></div>
+<p>For members of the group. Enter the password to continue.</p>
 ${message}${form}
 </main></body></html>`;
 }
