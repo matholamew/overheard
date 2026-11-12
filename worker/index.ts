@@ -27,7 +27,7 @@ const redirect = (location: string, extra: Record<string, string> = {}) =>
   new Response(null, { status: 303, headers: { location, "cache-control": "no-store", ...extra } });
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const password = env.SITE_PASSWORD;
 
@@ -67,17 +67,38 @@ export default {
       // Flat names so the files can be uploaded through the R2 dashboard as-is.
       // Must match r2Key() in scripts/vendor.mjs.
       const key = decodeURIComponent(url.pathname.slice("/vendor/".length)).replaceAll("/", "-");
-      const object = await env.VENDOR.get(key);
-      if (!object) return new Response(`Not found: ${key}`, { status: 404 });
 
-      const headers = new Headers();
-      object.writeHttpMetadata(headers);
-      headers.set("etag", object.httpEtag);
-      // Names are versioned (e.g. voz-4.3.0-VozWeb.wasm), so they never change.
-      // "private": only the signed-in browser caches them, never a shared cache.
+      // Keep these big immutable files in Cloudflare's edge cache, so repeat
+      // downloads come from the nearest data centre instead of R2. The cache
+      // key is internal; the password check above has already run.
+      const cache = caches.default;
+      const cacheKey = new Request(`${url.origin}/__vendor-cache/${encodeURIComponent(key)}`);
+      const fromR2 = async (): Promise<Response | null> => {
+        const object = await env.VENDOR.get(key);
+        if (!object) return null;
+        const stored = new Headers();
+        object.writeHttpMetadata(stored);
+        stored.set("etag", object.httpEtag);
+        stored.set("content-length", String(object.size));
+        stored.set("cache-control", "public, max-age=31536000, immutable");
+        if (key.endsWith(".wasm")) stored.set("content-type", "application/wasm");
+        return new Response(object.body, { headers: stored });
+      };
+      let upstream: Response | null | undefined = await cache.match(cacheKey);
+      if (!upstream) {
+        upstream = await fromR2();
+        if (!upstream) return new Response(`Not found: ${key}`, { status: 404 });
+        // Fill the edge cache from a second, separate read. Splitting one 46 MB
+        // stream between the browser and the cache could buffer it in memory.
+        ctx.waitUntil(
+          fromR2().then((copy) => (copy ? cache.put(cacheKey, copy) : undefined)).catch(() => undefined),
+        );
+      }
+
+      // To the browser: cacheable by this browser only, never by a shared cache.
+      const headers = new Headers(upstream.headers);
       headers.set("cache-control", "private, max-age=31536000, immutable");
-      if (key.endsWith(".wasm")) headers.set("content-type", "application/wasm");
-      return new Response(request.method === "HEAD" ? null : object.body, { headers });
+      return new Response(request.method === "HEAD" ? null : upstream.body, { status: 200, headers });
     }
 
     return env.ASSETS.fetch(request);

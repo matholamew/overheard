@@ -83,25 +83,41 @@ async function checkEnvironment() {
 
 let vozPromise: Promise<VozClass> | null = null;
 
+const looksLikeNetworkError = (err: unknown) =>
+  /network|aborted|failed to fetch|load failed|HTTP 5\d\d/i.test(err instanceof Error ? err.message : String(err));
+
+async function loadOnce(): Promise<VozClass> {
+  const { Voz } = await import("@desert-ant-labs/voz");
+  let sawDownload = false;
+  const voz = await Voz.load({
+    wasmDir: __ORT_WASM_DIR__,
+    onProgress: (fraction) => {
+      sawDownload = true;
+      setProgress(fraction);
+      if (fraction >= 1) {
+        showProgress("Preparing model…", "Compiling for this device. This takes a few seconds.");
+        setIndeterminate();
+      }
+    },
+  });
+  if (!sawDownload) setIndeterminate();
+  return voz;
+}
+
 function loadModel(): Promise<VozClass> {
   if (!vozPromise) {
     vozPromise = (async () => {
-      showProgress("Loading speech model…", "First run downloads ~400 MB once; later visits load from cache.");
-      const { Voz } = await import("@desert-ant-labs/voz");
-      let sawDownload = false;
-      const voz = await Voz.load({
-        wasmDir: __ORT_WASM_DIR__,
-        onProgress: (fraction) => {
-          sawDownload = true;
-          setProgress(fraction);
-          if (fraction >= 1) {
-            showProgress("Preparing model…", "Compiling for this device. This takes a few seconds.");
-            setIndeterminate();
-          }
-        },
-      });
-      if (!sawDownload) setIndeterminate();
-      return voz;
+      showProgress("Loading speech model…", "First run downloads about 470 MB once; later visits load from cache.");
+      try {
+        return await loadOnce();
+      } catch (err) {
+        // A dropped connection mid-download is common on big files: try once more.
+        if (!looksLikeNetworkError(err)) throw err;
+        console.warn("Model load failed, retrying once", err);
+        showProgress("Connection dropped, retrying…", "Picking up the download again.");
+        await new Promise((r) => setTimeout(r, 1500));
+        return await loadOnce();
+      }
     })().catch((err) => {
       vozPromise = null; // allow a retry
       throw err;
@@ -142,16 +158,21 @@ function showError(err: unknown) {
   console.error(err);
   const message = err instanceof Error ? err.message : String(err);
   let help = "";
-  if (/decode|codec|demux|unsupported|container/i.test(message)) {
+  if (/webassembly|vendor|wasm/i.test(message)) {
+    help =
+      "\n\nThe speech engine's own files (about 75 MB, served from this site) didn't finish downloading. " +
+      "It's usually a dropped connection: try again. If it keeps happening, try another browser or network, " +
+      "or turn off browser shields or ad blocking for this site.";
+  } else if (/decode|codec|demux|unsupported|container/i.test(message)) {
     help = "\n\nThis browser couldn't read that file's audio. Try an MP4/M4A/MP3/WAV, or convert it first.";
   } else if (/memory|allocation|out of/i.test(message)) {
     help = "\n\nThe device ran out of memory. Close other tabs or use a laptop/desktop.";
-  } else if (/failed to fetch|network|load failed/i.test(message)) {
+  } else if (/huggingface|hf\.co|meta\.json|\.onnx/i.test(message) || /failed to fetch|network|load failed/i.test(message)) {
     help =
-      "\n\nCouldn't download the speech model from Hugging Face (huggingface.co). Check your connection, " +
+      "\n\nCouldn't download the speech model (from huggingface.co). Check your connection, " +
       "and that an ad blocker, firewall or VPN isn't blocking it, then try again.";
-  } else if (/HTTP 4\d\d|vendor/i.test(message)) {
-    help = "\n\nA model file failed to download. If you deployed this yourself, check that `npm run upload-wasm` was run.";
+  } else if (/HTTP 4\d\d/i.test(message)) {
+    help = "\n\nA model file was refused. If this keeps happening, sign out and back in.";
   }
   els.errorMessage.textContent = message + help;
   show("error");
