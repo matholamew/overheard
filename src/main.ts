@@ -60,7 +60,7 @@ async function checkEnvironment() {
   engineLabel = adapter ? "WebGPU" : "CPU";
   if (!adapter) {
     notice(
-      "This browser has no WebGPU, so transcription will run on the CPU — correct, but much slower. Recent Chrome, Edge or Safari on a laptop works best.",
+      "This browser has no WebGPU, so transcription will run on the CPU. It still works, just much more slowly. Recent Chrome, Edge or Safari on a laptop works best.",
       true,
     );
   }
