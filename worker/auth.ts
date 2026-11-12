@@ -66,7 +66,25 @@ export async function sessionValid(cookieValue: string | null, password: string,
   return sameBytes(fromHex(sig), expected);
 }
 
-export function loginPage(opts: { error?: boolean; notConfigured?: boolean } = {}): string {
+const SHARE_TITLE = "Overheard";
+const SHARE_TEXT = "Private video and audio transcription for our group. It runs in your browser, and nothing is uploaded.";
+
+/** Link-preview tags. Chat apps can only see the password page, so they live here. */
+export function shareTags(rawOrigin: string): string {
+  // Some apps refuse http images; Cloudflare serves the real site over https.
+  const origin = /\/\/(localhost|127\.)/.test(rawOrigin) ? rawOrigin : rawOrigin.replace(/^http:/, "https:");
+  const image = `${origin}/og-image.jpg`;
+  return `<meta name="description" content="${SHARE_TEXT}"/>
+<meta property="og:type" content="website"/><meta property="og:site_name" content="${SHARE_TITLE}"/>
+<meta property="og:title" content="${SHARE_TITLE}"/><meta property="og:description" content="${SHARE_TEXT}"/>
+<meta property="og:url" content="${origin}/"/><meta property="og:image" content="${image}"/>
+<meta property="og:image:width" content="1200"/><meta property="og:image:height" content="630"/>
+<meta property="og:image:alt" content="Overheard: everything said, written down."/>
+<meta name="twitter:card" content="summary_large_image"/><meta name="twitter:title" content="${SHARE_TITLE}"/>
+<meta name="twitter:description" content="${SHARE_TEXT}"/><meta name="twitter:image" content="${image}"/>`;
+}
+
+export function loginPage(opts: { error?: boolean; notConfigured?: boolean; origin?: string } = {}): string {
   const message = opts.notConfigured
     ? `<p class="err">This site isn't set up yet: the <code>SITE_PASSWORD</code> secret is missing.</p>`
     : opts.error
@@ -82,6 +100,7 @@ export function loginPage(opts: { error?: boolean; notConfigured?: boolean } = {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/><meta name="robots" content="noindex"/>
 <meta name="theme-color" content="#f2ece1"/>
+${opts.origin ? shareTags(opts.origin) : ""}
 <title>Overheard</title><link rel="icon" href="/favicon.svg" type="image/svg+xml"/><link rel="apple-touch-icon" href="/apple-touch-icon.png"/>
 <style>
 :root{color-scheme:light;--paper:#f2ece1;--ink:#1b1813;--soft:#4a4339;--muted:#7d7365;--red:#b8321c}

@@ -31,8 +31,8 @@ export default {
     const url = new URL(request.url);
     const password = env.SITE_PASSWORD;
 
-    // The icons are harmless and make the login page look right.
-    if (url.pathname === "/favicon.svg" || url.pathname === "/apple-touch-icon.png") {
+    // Icons and the share image are public so the login page and link previews work.
+    if (["/favicon.svg", "/apple-touch-icon.png", "/og-image.jpg"].includes(url.pathname)) {
       return env.ASSETS.fetch(request);
     }
 
@@ -47,7 +47,7 @@ export default {
       }
       // Slow down guessing a little.
       await new Promise((r) => setTimeout(r, 750));
-      return html(loginPage({ error: true }), 401);
+      return html(loginPage({ error: true, origin: url.origin }), 401);
     }
 
     if (url.pathname === "/__logout") {
@@ -55,8 +55,13 @@ export default {
     }
 
     if (!(await sessionValid(readCookie(request.headers.get("cookie")), password))) {
-      const wantsPage = request.method === "GET" && (request.headers.get("accept") ?? "").includes("text/html");
-      return wantsPage ? html(loginPage(), 401) : new Response("Sign in required", { status: 401 });
+      // Pages get the password page with status 200, not 401: link-preview bots
+      // (iMessage, Slack, WhatsApp) skip pages that return an error, and this one
+      // only holds a password box and the share tags. App files stay locked.
+      const isFile = url.pathname.startsWith("/vendor/") || url.pathname.startsWith("/assets/");
+      return request.method === "GET" && !isFile
+        ? html(loginPage({ origin: url.origin }), 200)
+        : new Response("Sign in required", { status: 401 });
     }
 
     if (url.pathname.startsWith("/vendor/")) {
