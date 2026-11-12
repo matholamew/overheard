@@ -6,6 +6,9 @@ import {
   joinWords,
   segmentWords,
   toParagraphs,
+  toParagraphBlocks,
+  toPlainText,
+  toTimestampedText,
   toSrt,
   toVtt,
   wrapCue,
@@ -91,4 +94,35 @@ test("wrapCue splits into two balanced lines", () => {
 test("toParagraphs splits on long silences", () => {
   const paras = toParagraphs(w("Hi.@0-0.5 there.@0.6-1 New@5-5.3 topic.@5.3-5.8"));
   assert.deepEqual(paras, ["Hi. there.", "New topic."]);
+});
+
+test("segments and paragraphs break when the speaker changes", () => {
+  const words: Word[] = [
+    { text: "Hello", start: 0, end: 0.2, speaker: 0 },
+    { text: "there.", start: 0.3, end: 0.5, speaker: 0 },
+    { text: "Hi", start: 0.6, end: 0.8, speaker: 1 },
+    { text: "back.", start: 0.9, end: 1.1, speaker: 1 },
+  ];
+  const segs = segmentWords(words);
+  assert.deepEqual(segs.map((s) => [s.speaker, s.text]), [[0, "Hello there."], [1, "Hi back."]]);
+  assert.deepEqual(toParagraphBlocks(words).map((p) => [p.speaker, p.text]), [[0, "Hello there."], [1, "Hi back."]]);
+});
+
+test("exports carry speaker names", () => {
+  const segs = [
+    { start: 0, end: 1, text: "Hello there.", speaker: 0 },
+    { start: 1, end: 2, text: "Still me.", speaker: 0 },
+    { start: 2, end: 3, text: "Hi <back>.", speaker: 1 },
+  ];
+  const names = ["Matt", "Sarah"];
+  const nameOf = (s: number | undefined) => (s === undefined ? undefined : names[s]);
+  const srt = toSrt(segs, nameOf);
+  assert.ok(srt.includes("[Matt] Hello there."));
+  assert.ok(srt.includes("\nStill me.")); // no repeat label for the same speaker
+  assert.ok(srt.includes("[Sarah] Hi <back>."));
+  const vtt = toVtt(segs, nameOf);
+  assert.ok(vtt.includes("<v Matt>Hello there."));
+  assert.ok(vtt.includes("<v Sarah>Hi &lt;back&gt;."));
+  assert.ok(toTimestampedText(segs, nameOf).startsWith("[0:00] Matt: Hello there."));
+  assert.equal(toPlainText([{ text: "Hi.", speaker: 1 }, { text: "No speaker." }], nameOf), "Sarah: Hi.\n\nNo speaker.");
 });

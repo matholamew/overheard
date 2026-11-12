@@ -47,7 +47,16 @@
             <span class="drop-formats">MP4 · MOV · WEBM · MP3 · M4A · WAV</span>
           </label>
 
-          <p class="fine">English and 24 other European languages. Anything else comes back as confident nonsense.</p>
+          <div class="intake-foot">
+            <label class="option">
+              <input type="checkbox" id="speaker-toggle" checked />
+              <span class="option-box" aria-hidden="true"></span>
+              <span class="option-text">Label who's speaking
+                <small>Names are picked up when people introduce themselves. Adds a one-time download of about 90 MB.</small>
+              </span>
+            </label>
+            <p class="fine">English and 24 other European languages. Anything else comes back as confident nonsense.</p>
+          </div>
         </section>
 
         <section class="working hidden" id="progress-panel" aria-live="polite">
@@ -79,6 +88,11 @@
             <aside class="figure">
               <div id="media-slot" class="figure-frame"></div>
               <p class="caption"><span>Fig. 1</span> Tap any line of the transcript to hear it.</p>
+              <section id="cast" class="cast hidden" aria-label="Speakers">
+                <p class="kicker">Who's speaking</p>
+                <div id="cast-list" class="cast-list"></div>
+                <p class="fine">Type a name to change it everywhere, including downloads. Tap a name in the transcript to jump here.</p>
+              </section>
             </aside>
 
             <div class="story-body">

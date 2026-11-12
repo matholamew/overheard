@@ -11,9 +11,11 @@
   },
   "dependencies": {
     "@desert-ant-labs/voz": "4.3.0",
+    "@desert-ant-labs/who": "4.3.0",
     "@fontsource-variable/fraunces": "5.3.0",
     "@fontsource-variable/newsreader": "5.3.0",
     "@fontsource/ibm-plex-mono": "5.3.0",
+    "@litertjs/core": "2.6.0",
     "onnxruntime-web": "1.31.1"
   },
   "devDependencies": {

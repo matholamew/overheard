@@ -9,12 +9,17 @@ import type { Voz as VozClass, VozResult } from "@desert-ant-labs/voz";
 import {
   formatClock,
   segmentWords,
-  toParagraphs,
+  toParagraphBlocks,
+  toPlainText,
   toSrt,
   toTimestampedText,
   toVtt,
+  type NameOf,
+  type Paragraph,
   type Segment,
+  type Word,
 } from "./captions";
+import { assignSpeakers, detectNames } from "./speakers";
 
 declare const __ORT_WASM_URL__: string;
 
@@ -38,6 +43,9 @@ const els = {
   resultStats: $("result-stats"),
   newFile: $("new-file"),
   mediaSlot: $("media-slot"),
+  speakerToggle: $<HTMLInputElement>("speaker-toggle"),
+  cast: $("cast"),
+  castList: $("cast-list"),
   transcript: $("transcript"),
   copyBtn: $("copy-btn"),
   downloadBtn: $("download-btn"),
@@ -249,13 +257,65 @@ function showError(err: unknown) {
 
 // ---------- transcription ----------
 
+interface SpeakerName {
+  name: string;
+  /** true when found in the speaker's own introduction and not yet confirmed. */
+  guessed: boolean;
+}
+
 interface Current {
   name: string;
   base: string;
   result: VozResult;
+  words: Word[];
   segments: Segment[];
-  paragraphs: string[];
+  paragraphs: Paragraph[];
+  /** Speaker numbers in order of first speech; empty when speakers weren't labelled. */
+  speakers: number[];
+  names: Map<number, SpeakerName>;
   mediaUrl: string;
+}
+
+const nameOf: NameOf = (speaker) => {
+  if (speaker === undefined || !current || current.speakers.length === 0) return undefined;
+  const typed = current.names.get(speaker)?.name.trim();
+  return typed || `Speaker ${current.speakers.indexOf(speaker) + 1}`;
+};
+
+/** Runs Who on the file and attaches a speaker to every word. Never throws:
+ *  if it fails, the transcript is still shown, with a note. */
+async function labelSpeakers(file: File, words: Word[]): Promise<{ words: Word[]; speakers: number[]; names: Map<number, SpeakerName> }> {
+  const none = { words, speakers: [] as number[], names: new Map<number, SpeakerName>() };
+  try {
+    const { loadWho, decodeMono16k, findSpeakers } = await import("./who");
+    showProgress("Working out who's speaking…", "Loading the speaker model. The first time, that's about 32 MB.");
+    const stop = trackModelBytes((loaded, total) => {
+      setProgress(loaded / total);
+      els.progressDetail.textContent = `Speaker model: ${mb(loaded)} of ${mb(total)} MB. This happens once.`;
+    });
+    let who;
+    try {
+      who = await loadWho();
+    } finally {
+      stop();
+    }
+    showProgress("Working out who's speaking…", "Reading the audio.");
+    setProgress(0);
+    const samples = await decodeMono16k(file, setProgress);
+    showProgress("Working out who's speaking…", "Listening for different voices.");
+    const { turns } = await findSpeakers(who, samples);
+    const labelled = assignSpeakers(words, turns);
+    const speakers = [...new Set(labelled.map((w) => w.speaker).filter((s): s is number => s !== undefined))];
+    if (speakers.length < 2) return none; // one voice: labels would only add noise
+    const names = new Map<number, SpeakerName>();
+    for (const [speaker, name] of detectNames(labelled)) names.set(speaker, { name, guessed: true });
+    return { words: labelled, speakers, names };
+  } catch (err) {
+    console.warn("Speaker labelling failed", err);
+    const message = err instanceof Error ? err.message : String(err);
+    notice(`Speakers couldn't be labelled this time, so the transcript has no names. (${message.slice(0, 160)})`);
+    return none;
+  }
 }
 
 let current: Current | null = null;
@@ -275,13 +335,21 @@ async function handleFile(file: File) {
     const wall = (performance.now() - started) / 1000;
     console.info("voz timings", voz.timings, { wall });
 
+    const labelled =
+      els.speakerToggle.checked && result.words.length > 0
+        ? await labelSpeakers(file, result.words)
+        : { words: result.words as Word[], speakers: [] as number[], names: new Map<number, SpeakerName>() };
+
     if (current) URL.revokeObjectURL(current.mediaUrl);
     current = {
       name: file.name,
       base: file.name.replace(/\.[^.]+$/, "") || "transcript",
       result,
-      segments: segmentWords(result.words),
-      paragraphs: toParagraphs(result.words),
+      words: labelled.words,
+      segments: segmentWords(labelled.words),
+      paragraphs: toParagraphBlocks(labelled.words),
+      speakers: labelled.speakers,
+      names: labelled.names,
       mediaUrl: URL.createObjectURL(file),
     };
     renderResult(file);
@@ -297,7 +365,8 @@ function renderResult(file: File) {
   const speed = result.realtimeFactor >= 10 ? Math.round(result.realtimeFactor) : result.realtimeFactor.toFixed(1);
   els.resultStats.textContent =
     `${formatClock(result.duration)} of audio · transcribed in ${result.processingTime.toFixed(1)}s ` +
-    `(${speed}× real time on ${engineLabel}) · ${result.words.length.toLocaleString()} words`;
+    `(${speed}× real time on ${engineLabel}) · ${result.words.length.toLocaleString()} words` +
+    (current.speakers.length ? ` · ${current.speakers.length} speakers` : "");
 
   els.mediaSlot.replaceChildren();
   const isVideo = file.type.startsWith("video/") || /\.(mp4|mov|webm|mkv)$/i.test(file.name);
@@ -309,8 +378,72 @@ function renderResult(file: File) {
   media.addEventListener("timeupdate", () => highlight(media.currentTime));
   els.mediaSlot.append(media);
 
+  renderCast();
   renderTranscript();
   show("result");
+}
+
+/** The "Who's speaking" list: one editable name per speaker. */
+function renderCast() {
+  if (!current) return;
+  const cur = current;
+  els.cast.classList.toggle("hidden", cur.speakers.length === 0);
+  els.castList.replaceChildren();
+  const spoken = new Map<number, number>();
+  for (const w of cur.words) if (w.speaker !== undefined) spoken.set(w.speaker, (spoken.get(w.speaker) ?? 0) + 1);
+  const totalWords = Math.max(1, cur.words.length);
+
+  cur.speakers.forEach((speaker, i) => {
+    const row = document.createElement("label");
+    row.className = "cast-row";
+    const num = document.createElement("span");
+    num.className = "cast-num";
+    num.textContent = String(i + 1);
+    const input = document.createElement("input");
+    input.type = "text";
+    input.placeholder = `Speaker ${i + 1}`;
+    input.value = cur.names.get(speaker)?.name ?? "";
+    input.dataset.speaker = String(speaker);
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    const tag = document.createElement("span");
+    tag.className = "cast-tag";
+    const guessed = cur.names.get(speaker)?.guessed;
+    tag.textContent = guessed ? "from intro" : `${Math.round(((spoken.get(speaker) ?? 0) / totalWords) * 100)}%`;
+    if (guessed) tag.title = "Found where this person introduced themselves. Edit if it's wrong.";
+    input.addEventListener("input", () => {
+      cur.names.set(speaker, { name: input.value, guessed: false });
+      tag.textContent = `${Math.round(((spoken.get(speaker) ?? 0) / totalWords) * 100)}%`;
+      tag.removeAttribute("title");
+      renderTranscript();
+    });
+    row.append(num, input, tag);
+    els.castList.append(row);
+  });
+}
+
+function focusSpeaker(speaker: number | undefined) {
+  if (speaker === undefined) return;
+  const input = els.castList.querySelector<HTMLInputElement>(`input[data-speaker="${speaker}"]`);
+  if (!input) return;
+  input.focus();
+  input.select();
+  input.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+function speakerTag(speaker: number | undefined): HTMLElement | null {
+  const name = nameOf(speaker);
+  if (!name) return null;
+  const tag = document.createElement("button");
+  tag.type = "button";
+  tag.className = "who";
+  tag.textContent = name;
+  tag.title = "Rename this speaker";
+  tag.addEventListener("click", (e) => {
+    e.stopPropagation();
+    focusSpeaker(speaker);
+  });
+  return tag;
 }
 
 function renderTranscript() {
@@ -320,8 +453,10 @@ function renderTranscript() {
     els.transcript.textContent = "No speech was detected in this file.";
     return;
   }
+  els.transcript.classList.toggle("has-speakers", current.speakers.length > 0);
   if (view === "segments") {
     const frag = document.createDocumentFragment();
+    let lastSpeaker: number | undefined = -1;
     current.segments.forEach((seg, i) => {
       const row = document.createElement("div");
       row.className = "seg";
@@ -333,6 +468,12 @@ function renderTranscript() {
       const ink = document.createElement("span");
       ink.className = "hl";
       ink.textContent = seg.text;
+      const tag = seg.speaker !== lastSpeaker ? speakerTag(seg.speaker) : null;
+      lastSpeaker = seg.speaker;
+      if (tag) {
+        row.classList.add("turn");
+        text.append(tag, " ");
+      }
       text.append(ink);
       row.append(time, text);
       row.addEventListener("click", () => seek(seg.start));
@@ -343,7 +484,9 @@ function renderTranscript() {
     for (const p of current.paragraphs) {
       const el = document.createElement("p");
       el.className = "para";
-      el.textContent = p;
+      const tag = speakerTag(p.speaker);
+      if (tag) el.append(tag, " ");
+      el.append(p.text);
       els.transcript.append(el);
     }
   }
@@ -381,11 +524,11 @@ function exportAs(format: string): { content: string; ext: string; type: string 
   if (!current) throw new Error("Nothing to export");
   switch (format) {
     case "srt":
-      return { content: toSrt(current.segments), ext: "srt", type: "application/x-subrip" };
+      return { content: toSrt(current.segments, nameOf), ext: "srt", type: "application/x-subrip" };
     case "vtt":
-      return { content: toVtt(current.segments), ext: "vtt", type: "text/vtt" };
+      return { content: toVtt(current.segments, nameOf), ext: "vtt", type: "text/vtt" };
     case "timestamped":
-      return { content: toTimestampedText(current.segments), ext: "timestamped.txt", type: "text/plain" };
+      return { content: toTimestampedText(current.segments, nameOf), ext: "timestamped.txt", type: "text/plain" };
     case "json":
       return {
         content: JSON.stringify(
@@ -393,8 +536,9 @@ function exportAs(format: string): { content: string; ext: string; type: string 
             file: current.name,
             duration: current.result.duration,
             text: current.result.text,
-            segments: current.segments,
-            words: current.result.words,
+            speakers: current.speakers.map((s) => ({ speaker: s, name: nameOf(s) })),
+            segments: current.segments.map((seg) => ({ ...seg, name: nameOf(seg.speaker) })),
+            words: current.words,
           },
           null,
           2,
@@ -403,7 +547,7 @@ function exportAs(format: string): { content: string; ext: string; type: string 
         type: "application/json",
       };
     default:
-      return { content: current.paragraphs.join("\n\n"), ext: "txt", type: "text/plain" };
+      return { content: toPlainText(current.paragraphs, nameOf), ext: "txt", type: "text/plain" };
   }
 }
 
@@ -420,7 +564,23 @@ function download(format: string) {
 
 // ---------- wiring ----------
 
+const SPEAKER_PREF = "overheard.labelSpeakers";
+
 function wire() {
+  try {
+    const saved = localStorage.getItem(SPEAKER_PREF);
+    if (saved !== null) els.speakerToggle.checked = saved === "1";
+  } catch {
+    /* storage unavailable: keep the default (on) */
+  }
+  els.speakerToggle.addEventListener("change", () => {
+    try {
+      localStorage.setItem(SPEAKER_PREF, els.speakerToggle.checked ? "1" : "0");
+    } catch {
+      /* not remembered, which is fine */
+    }
+  });
+
   els.fileInput.addEventListener("change", () => {
     const file = els.fileInput.files?.[0];
     els.fileInput.value = "";
@@ -468,7 +628,8 @@ function wire() {
 
   els.copyBtn.addEventListener("click", async () => {
     if (!current) return;
-    const text = view === "segments" ? toTimestampedText(current.segments) : current.paragraphs.join("\n\n");
+    const text =
+      view === "segments" ? toTimestampedText(current.segments, nameOf) : toPlainText(current.paragraphs, nameOf);
     try {
       await navigator.clipboard.writeText(text);
       els.copyBtn.textContent = "Copied";

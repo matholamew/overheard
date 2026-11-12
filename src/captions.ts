@@ -5,12 +5,14 @@ export interface Word {
   text: string;
   start: number; // seconds
   end: number; // seconds
+  speaker?: number; // from the Who model, 0-based, when speakers were labelled
 }
 
 export interface Segment {
   start: number;
   end: number;
   text: string;
+  speaker?: number;
 }
 
 const SENTENCE_END = /[.!?]["')\]]?$/;
@@ -45,11 +47,13 @@ export function segmentWords(words: Word[], opts: SegmentOptions = CAPTION_DEFAU
 
   const flush = () => {
     if (current.length === 0) return;
-    segments.push({
+    const seg: Segment = {
       start: current[0].start,
       end: current[current.length - 1].end,
       text: joinWords(current),
-    });
+    };
+    if (current[0].speaker !== undefined) seg.speaker = current[0].speaker;
+    segments.push(seg);
     current = [];
   };
 
@@ -62,7 +66,9 @@ export function segmentWords(words: Word[], opts: SegmentOptions = CAPTION_DEFAU
       const gap = word.start - prev.end;
       const projectedText = joinWords([...current, word]);
       const projectedDuration = word.end - current[0].start;
-      if (gap >= opts.pauseBreak) {
+      if (word.speaker !== prev.speaker) {
+        flush();
+      } else if (gap >= opts.pauseBreak) {
         flush();
       } else if (projectedText.length > opts.maxChars || projectedDuration > opts.maxDuration) {
         // Overflowing: end the cue at its last clause break if there is one in
@@ -94,23 +100,51 @@ export function segmentWords(words: Word[], opts: SegmentOptions = CAPTION_DEFAU
   return segments;
 }
 
-/** Groups sentences into paragraphs for the plain-text view. */
-export function toParagraphs(words: Word[], pauseBreak = 2, maxChars = 600): string[] {
-  const paragraphs: string[] = [];
+export interface Paragraph {
+  text: string;
+  speaker?: number;
+}
+
+/** Groups sentences into paragraphs, starting a new one at a long pause or a new speaker. */
+export function toParagraphBlocks(words: Word[], pauseBreak = 2, maxChars = 600): Paragraph[] {
+  const paragraphs: Paragraph[] = [];
   let current: Word[] = [];
   const flush = () => {
-    if (current.length) paragraphs.push(joinWords(current));
+    if (current.length) {
+      const p: Paragraph = { text: joinWords(current) };
+      if (current[0].speaker !== undefined) p.speaker = current[0].speaker;
+      paragraphs.push(p);
+    }
     current = [];
   };
   for (const word of words) {
     if (!word.text.trim()) continue;
     const prev = current[current.length - 1];
-    if (prev && word.start - prev.end >= pauseBreak) flush();
+    if (prev && (word.start - prev.end >= pauseBreak || word.speaker !== prev.speaker)) flush();
     current.push(word);
     if (SENTENCE_END.test(word.text) && joinWords(current).length >= maxChars) flush();
   }
   flush();
   return paragraphs;
+}
+
+/** Paragraph texts only, for callers that don't need speakers. */
+export function toParagraphs(words: Word[], pauseBreak = 2, maxChars = 600): string[] {
+  return toParagraphBlocks(words, pauseBreak, maxChars).map((p) => p.text);
+}
+
+/** Turns a speaker number into a display name; undefined when there is none. */
+export type NameOf = (speaker: number | undefined) => string | undefined;
+const noNames: NameOf = () => undefined;
+
+/** Plain text with "Name: " before each paragraph when speakers are known. */
+export function toPlainText(paragraphs: Paragraph[], nameOf: NameOf = noNames): string {
+  return paragraphs
+    .map((p) => {
+      const name = nameOf(p.speaker);
+      return name ? `${name}: ${p.text}` : p.text;
+    })
+    .join("\n\n");
 }
 
 function pad(n: number, width = 2): string {
@@ -136,18 +170,29 @@ export function formatClock(seconds: number): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 }
 
-export function toSrt(segments: Segment[]): string {
+/** SRT: "[Name] " before a cue whenever the speaker changes. */
+export function toSrt(segments: Segment[], nameOf: NameOf = noNames): string {
+  let last: number | undefined = -1;
   return segments
-    .map(
-      (seg, i) =>
-        `${i + 1}\n${formatTimestamp(seg.start, ",")} --> ${formatTimestamp(seg.end, ",")}\n${wrapCue(seg.text)}\n`,
-    )
+    .map((seg, i) => {
+      const name = nameOf(seg.speaker);
+      const label = name && seg.speaker !== last ? `[${name}] ` : "";
+      last = seg.speaker;
+      return `${i + 1}\n${formatTimestamp(seg.start, ",")} --> ${formatTimestamp(seg.end, ",")}\n${wrapCue(label + seg.text)}\n`;
+    })
     .join("\n");
 }
 
-export function toVtt(segments: Segment[]): string {
+const vttEscape = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/** WebVTT: each cue carries a <v Name> voice tag when speakers are known. */
+export function toVtt(segments: Segment[], nameOf: NameOf = noNames): string {
   const cues = segments
-    .map((seg) => `${formatTimestamp(seg.start, ".")} --> ${formatTimestamp(seg.end, ".")}\n${wrapCue(seg.text)}\n`)
+    .map((seg) => {
+      const name = nameOf(seg.speaker);
+      const body = name ? `<v ${vttEscape(name)}>${vttEscape(seg.text)}` : vttEscape(seg.text);
+      return `${formatTimestamp(seg.start, ".")} --> ${formatTimestamp(seg.end, ".")}\n${name ? body : wrapCue(body)}\n`;
+    })
     .join("\n");
   return `WEBVTT\n\n${cues}`;
 }
@@ -170,6 +215,11 @@ export function wrapCue(text: string, maxLine = 42): string {
   return best;
 }
 
-export function toTimestampedText(segments: Segment[]): string {
-  return segments.map((s) => `[${formatClock(s.start)}] ${s.text}`).join("\n");
+export function toTimestampedText(segments: Segment[], nameOf: NameOf = noNames): string {
+  return segments
+    .map((s) => {
+      const name = nameOf(s.speaker);
+      return `[${formatClock(s.start)}] ${name ? `${name}: ` : ""}${s.text}`;
+    })
+    .join("\n");
 }

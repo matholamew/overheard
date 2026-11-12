@@ -1,7 +1,7 @@
 // One place that decides where the big wasm files live in R2, so the build and
 // the upload script can never disagree. Keys include package versions, so
 // upgrading a package means re-running `npm run upload-wasm`.
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
@@ -13,12 +13,26 @@ export const ORT_WASM_FILE = "ort-wasm-simd-threaded.asyncify.wasm";
 
 export function vendorKeys() {
   const voz = versionOf("@desert-ant-labs/voz");
+  const who = versionOf("@desert-ant-labs/who");
   const ort = versionOf("onnxruntime-web");
+  const litert = versionOf("@litertjs/core");
   return {
     voz: `voz-${voz}/VozWeb.wasm`,
+    who: `who-${who}/WhoWeb.wasm`,
     ortDir: `ort-${ort}`,
     ort: `ort-${ort}/${ORT_WASM_FILE}`,
+    // LiteRT's runtime files are each under 25 MiB, so they ship with the app
+    // as static assets (not R2), at a pinned version instead of a CDN's "latest".
+    litertDir: `litert-${litert}`,
   };
+}
+
+/** LiteRT's runtime (.js glue + .wasm), copied into the build under /<litertDir>/. */
+export function litertFiles() {
+  const dir = join(pkgDir("@litertjs/core"), "wasm");
+  return readdirSync(dir)
+    .filter((f) => /\.(js|wasm)$/.test(f))
+    .map((f) => ({ name: f, file: join(dir, f) }));
 }
 
 /** R2 object names are flat (no folders) so they can be uploaded through the
@@ -30,6 +44,7 @@ export function vendorFiles() {
   const keys = vendorKeys();
   return [
     { key: keys.voz, file: join(pkgDir("@desert-ant-labs/voz"), "dist", "VozWeb.wasm") },
+    { key: keys.who, file: join(pkgDir("@desert-ant-labs/who"), "dist", "WhoWeb.wasm") },
     { key: keys.ort, file: join(pkgDir("onnxruntime-web"), "dist", ORT_WASM_FILE) },
   ].map((f) => ({ ...f, r2Key: r2Key(f.key) }));
 }
