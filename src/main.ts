@@ -16,7 +16,7 @@ import {
   type Segment,
 } from "./captions";
 
-declare const __ORT_WASM_DIR__: string;
+declare const __ORT_WASM_URL__: string;
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -127,7 +127,13 @@ function trackModelBytes(onBytes: (loaded: number, total: number) => void): () =
 const mb = (bytes: number) => Math.round(bytes / 1_000_000).toLocaleString();
 
 async function loadOnce(): Promise<VozClass> {
-  const { Voz } = await import("@desert-ant-labs/voz");
+  const [{ Voz }, ort] = await Promise.all([
+    import("@desert-ant-labs/voz"),
+    import("onnxruntime-web/webgpu"),
+  ]);
+  // Point ONNX Runtime at the one .wasm file it needs (served from R2 under
+  // /vendor/). Passing an object with only `wasm` keeps its bundled .mjs glue.
+  ort.env.wasm.wasmPaths = { wasm: new URL(__ORT_WASM_URL__, location.href).href };
   let downloading = false;
   let preparing = false;
   const prepare = () => {
@@ -152,7 +158,7 @@ async function loadOnce(): Promise<VozClass> {
   });
   try {
     const voz = await Voz.load({
-      wasmDir: __ORT_WASM_DIR__,
+      ort,
       // Per-file progress: only used to notice that every file has arrived.
       onProgress: (fraction) => {
         if (fraction >= 1 && downloading) prepare();
@@ -218,7 +224,10 @@ function showError(err: unknown) {
   console.error(err);
   const message = err instanceof Error ? err.message : String(err);
   let help = "";
-  if (/webassembly|vendor|wasm/i.test(message)) {
+  if (/dynamically imported module|no available backend/i.test(message)) {
+    help =
+      "\n\nThe speech engine couldn't start in this browser. Please send this message to whoever runs Overheard.";
+  } else if (/webassembly|vendor|wasm/i.test(message)) {
     help =
       "\n\nThe speech engine's own files (about 75 MB, served from this site) didn't finish downloading. " +
       "It's usually a dropped connection: try again. If it keeps happening, try another browser or network, " +

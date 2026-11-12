@@ -9,7 +9,7 @@ const keys = vendorKeys();
  * onnxruntime-web bundles a 28 MB wasm the same way. Both are over the 25 MiB
  * per-file limit of Workers Static Assets, so:
  *  - Voz's URL is rewritten to /vendor/<versioned key>, served from R2;
- *  - ONNX Runtime is pointed there at runtime through Voz's `wasmDir` option;
+ *  - ONNX Runtime is pointed at its file there (env.wasm.wasmPaths = { wasm });
  *  - the emitted copies are dropped from the build so `wrangler deploy` passes.
  */
 function vendorWasm(): Plugin {
@@ -49,7 +49,9 @@ const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), 
 export default defineConfig({
   plugins: [vendorWasm()],
   define: {
-    __ORT_WASM_DIR__: JSON.stringify(`/vendor/${keys.ortDir}/`),
+    // The exact .wasm file, not a folder: given a folder, ONNX Runtime also
+    // fetches its .mjs glue from there instead of using the bundled copy.
+    __ORT_WASM_URL__: JSON.stringify(`/vendor/${keys.ort}`),
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
   optimizeDeps: {
