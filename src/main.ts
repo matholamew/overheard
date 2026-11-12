@@ -8,6 +8,7 @@ import "./style.css";
 import type { Voz as VozClass, VozResult } from "@desert-ant-labs/voz";
 import {
   formatClock,
+  readingRows,
   segmentWords,
   toParagraphBlocks,
   toPlainText,
@@ -268,7 +269,10 @@ interface Current {
   base: string;
   result: VozResult;
   words: Word[];
+  /** Subtitle-sized cues, for the SRT and VTT downloads. */
   segments: Segment[];
+  /** Reading rows (new row at each pause or speaker change), for the Timed view. */
+  rows: Segment[];
   paragraphs: Paragraph[];
   /** Speaker numbers in order of first speech; empty when speakers weren't labelled. */
   speakers: number[];
@@ -347,6 +351,7 @@ async function handleFile(file: File) {
       result,
       words: labelled.words,
       segments: segmentWords(labelled.words),
+      rows: readingRows(labelled.words),
       paragraphs: toParagraphBlocks(labelled.words),
       speakers: labelled.speakers,
       names: labelled.names,
@@ -457,7 +462,7 @@ function renderTranscript() {
   if (view === "segments") {
     const frag = document.createDocumentFragment();
     let lastSpeaker: number | undefined = -1;
-    current.segments.forEach((seg, i) => {
+    current.rows.forEach((seg, i) => {
       const row = document.createElement("div");
       row.className = "seg";
       row.dataset.index = String(i);
@@ -502,7 +507,7 @@ function seek(seconds: number) {
 let activeIndex = -1;
 function highlight(time: number) {
   if (!current || view !== "segments") return;
-  const segs = current.segments;
+  const segs = current.rows;
   let idx = -1;
   for (let i = 0; i < segs.length; i++) {
     if (segs[i].start <= time) idx = i;
@@ -528,7 +533,7 @@ function exportAs(format: string): { content: string; ext: string; type: string 
     case "vtt":
       return { content: toVtt(current.segments, nameOf), ext: "vtt", type: "text/vtt" };
     case "timestamped":
-      return { content: toTimestampedText(current.segments, nameOf), ext: "timestamped.txt", type: "text/plain" };
+      return { content: toTimestampedText(current.rows, nameOf), ext: "timestamped.txt", type: "text/plain" };
     case "json":
       return {
         content: JSON.stringify(
@@ -537,7 +542,8 @@ function exportAs(format: string): { content: string; ext: string; type: string 
             duration: current.result.duration,
             text: current.result.text,
             speakers: current.speakers.map((s) => ({ speaker: s, name: nameOf(s) })),
-            segments: current.segments.map((seg) => ({ ...seg, name: nameOf(seg.speaker) })),
+            rows: current.rows.map((row) => ({ ...row, name: nameOf(row.speaker) })),
+            captions: current.segments.map((seg) => ({ ...seg, name: nameOf(seg.speaker) })),
             words: current.words,
           },
           null,
@@ -629,7 +635,7 @@ function wire() {
   els.copyBtn.addEventListener("click", async () => {
     if (!current) return;
     const text =
-      view === "segments" ? toTimestampedText(current.segments, nameOf) : toPlainText(current.paragraphs, nameOf);
+      view === "segments" ? toTimestampedText(current.rows, nameOf) : toPlainText(current.paragraphs, nameOf);
     try {
       await navigator.clipboard.writeText(text);
       els.copyBtn.textContent = "Copied";

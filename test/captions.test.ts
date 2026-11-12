@@ -5,6 +5,7 @@ import {
   formatTimestamp,
   joinWords,
   segmentWords,
+  readingRows,
   toParagraphs,
   toParagraphBlocks,
   toPlainText,
@@ -125,4 +126,33 @@ test("exports carry speaker names", () => {
   assert.ok(vtt.includes("<v Sarah>Hi &lt;back&gt;."));
   assert.ok(toTimestampedText(segs, nameOf).startsWith("[0:00] Matt: Hello there."));
   assert.equal(toPlainText([{ text: "Hi.", speaker: 1 }, { text: "No speaker." }], nameOf), "Sarah: Hi.\n\nNo speaker.");
+});
+
+test("readingRows break only at pauses and speaker changes, never mid-sentence", () => {
+  // One sentence spoken over 9 seconds with no pause: subtitles split it, reading rows don't.
+  const sentence = "And I would make the observation this is the first proclamation we've had that came with a complete business case embedded in it all.";
+  const words: Word[] = sentence.split(" ").map((t, i) => ({ text: t, start: i * 0.35, end: i * 0.35 + 0.3 }));
+  assert.ok(segmentWords(words).length > 1);
+  const rows = readingRows(words);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].text, sentence);
+
+  // A pause starts a new row; so does a new speaker.
+  const more: Word[] = [
+    { text: "Thank", start: 0, end: 0.2, speaker: 0 },
+    { text: "you.", start: 0.25, end: 0.5, speaker: 0 },
+    { text: "Next", start: 1.6, end: 1.8, speaker: 0 },
+    { text: "item.", start: 1.85, end: 2.1, speaker: 0 },
+    { text: "Second.", start: 2.2, end: 2.5, speaker: 1 },
+  ];
+  assert.deepEqual(readingRows(more).map((r) => r.text), ["Thank you.", "Next item.", "Second."]);
+});
+
+test("readingRows cap a very long unbroken stretch at a sentence end", () => {
+  const words: Word[] = [];
+  for (let i = 0; i < 400; i++) words.push({ text: i % 10 === 9 ? "word." : "word", start: i * 0.3, end: i * 0.3 + 0.25 });
+  const rows = readingRows(words);
+  assert.ok(rows.length > 1);
+  for (const r of rows) assert.ok(r.text.length <= 900, `row too long: ${r.text.length}`);
+  assert.equal(rows.map((r) => r.text.split(" ").length).reduce((a, b) => a + b), 400);
 });

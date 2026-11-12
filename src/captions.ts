@@ -100,6 +100,37 @@ export function segmentWords(words: Word[], opts: SegmentOptions = CAPTION_DEFAU
   return segments;
 }
 
+/**
+ * Rows for reading (the Timed view and timestamped text): a new row at every
+ * pause or change of speaker, so sentences are never cut in half the way
+ * subtitle cues are. A very long unbroken stretch still ends at a sentence
+ * once it passes `softMax` characters, and anywhere past `hardMax`, so one
+ * row can't swallow minutes of a speech.
+ */
+export function readingRows(words: Word[], pause = 0.8, softMax = 420, hardMax = 900): Segment[] {
+  const rows: Segment[] = [];
+  let current: Word[] = [];
+  let chars = 0;
+  const flush = () => {
+    if (current.length === 0) return;
+    const row: Segment = { start: current[0].start, end: current[current.length - 1].end, text: joinWords(current) };
+    if (current[0].speaker !== undefined) row.speaker = current[0].speaker;
+    rows.push(row);
+    current = [];
+    chars = 0;
+  };
+  for (const word of words) {
+    if (!word.text.trim()) continue;
+    const prev = current[current.length - 1];
+    if (prev && (word.speaker !== prev.speaker || word.start - prev.end >= pause)) flush();
+    current.push(word);
+    chars += word.text.length + 1;
+    if ((chars >= softMax && SENTENCE_END.test(word.text)) || chars >= hardMax) flush();
+  }
+  flush();
+  return rows;
+}
+
 export interface Paragraph {
   text: string;
   speaker?: number;
